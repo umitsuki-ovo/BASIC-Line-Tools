@@ -1,0 +1,94 @@
+{
+    "name": "basic-line-tools",
+    "displayName": "BASIC Line Tools",
+    "description": "BASIC line numbering and renumbering",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "icon": "images/icon.png",
+    "categories": ["Programming Languages"],
+    "activationEvents": [
+        "onLanguage:basic"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "basic",
+                "aliases": ["BASIC"],
+                "extensions": [".bas"],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "basic",
+                "scopeName": "source.basic",
+                "path": "./syntaxes/basic.tmLanguage.json"
+            }
+        ],
+        "commands": [
+            {
+                "command": "basic.addLineNumbers",
+                "title": "BASIC: Add Line Numbers (or Selection)"
+            },
+            {
+                "command": "basic.removeLineNumbers",
+                "title": "BASIC: Remove Line Numbers (or Selection)"
+            },
+            {
+                "command": "basic.renumber",
+                "title": "BASIC: Renumber Lines (or Selection)"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "basic.insertLineWithNumber",
+                "key": "enter",
+                "when": "editorLangId == basic && editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode && !editorHasMultipleSelections"
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "basic.addLineNumbers",
+                    "when": "editorLangId == basic",
+                    "group": "navigation"
+                },
+                {
+                    "command": "basic.removeLineNumbers",
+                    "when": "editorLangId == basic",
+                    "group": "navigation"
+                },
+                {
+                    "command": "basic.renumber",
+                    "when": "editorLangId == basic",
+                    "group": "navigation"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "BASIC Line Number",
+            "properties": {
+                "basicLineNumber.start": {
+                    "type": "number",
+                    "default": 100,
+                    "description": "Starting line number when adding line numbers"
+                },
+                "basicLineNumber.step": {
+                    "type": "number",
+                    "default": 10,
+                    "description": "Increment between line numbers"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p ./"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.80.0",
+        "typescript": "^5.0.0"
+    }
+}
