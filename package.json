@@ -8,6 +8,10 @@
     },
     "icon": "images/icon.png",
     "categories": ["Programming Languages"],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/umitsuki-ovo/BASIC-Line-Tools.git"
+    },
     "activationEvents": [
         "onLanguage:basic"
     ],
@@ -83,12 +87,5 @@
                 }
             }
         }
-    },
-    "scripts": {
-        "compile": "tsc -p ./"
-    },
-    "devDependencies": {
-        "@types/vscode": "^1.80.0",
-        "typescript": "^5.0.0"
     }
 }
