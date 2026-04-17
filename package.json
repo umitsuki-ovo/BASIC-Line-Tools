@@ -2,7 +2,8 @@
     "name": "basic-line-tools",
     "displayName": "BASIC Line Tools",
     "description": "BASIC line numbering and renumbering",
-    "version": "0.0.1",
+    "version": "0.0.2",
+    "publisher": "umitsuki",
     "engines": {
         "vscode": "^1.80.0"
     },
@@ -87,5 +88,12 @@
                 }
             }
         }
+    },
+    "scripts": {
+        "compile": "tsc -p ./"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.80.0",
+        "typescript": "^5.0.0"
     }
 }

@@ -182,40 +182,162 @@ export function activate(context: vscode.ExtensionContext) {
         await vscode.workspace.applyEdit(edit);
     });
 
-    //  Enter key handler
+    // Enter key handler
     const insertLine = vscode.commands.registerCommand('basic.insertLineWithNumber', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
 
-        const config    = vscode.workspace.getConfiguration('basicLineNumber');
-        const step      = config.get<number>('step', 10);
+        const config = vscode.workspace.getConfiguration('basicLineNumber');
+        const step   = config.get<number>('step', 10);
+
         const doc       = editor.document;
         const selection = editor.selection;
         const pos       = selection.active;
         const curLine   = doc.lineAt(pos.line);
         const curNum    = getLineNumber(curLine.text);
 
-        // No line number on this line → fall back to the default Enter behavior
+        // No line number → fallback to default Enter behavior
         if (curNum === null) {
             await vscode.commands.executeCommand('default:type', { text: '\n' });
             return;
         }
 
+        const isAtLineStart = pos.character === 0;
+        const isAtLineEnd   = pos.character === curLine.range.end.character;
+        const isMiddle      = !isAtLineStart && !isAtLineEnd;
+
+        const fullText = curLine.text;
+
+        // shared shift logic (kept identical to original Enter branch)
+        const buildShiftEdit = (baseLine: number, nextNum: number) => {
+            const allLines: string[] = [];
+            for (let i = 0; i < doc.lineCount; i++) {
+                allLines.push(doc.lineAt(i).text);
+            }
+
+            const shiftIndices: number[] = [];
+            let expected = nextNum;
+
+            for (let i = baseLine + 1; i < allLines.length; i++) {
+                if (allLines[i].trim() === '') continue;
+
+                const ln = getLineNumber(allLines[i]);
+                if (ln === null || ln !== expected) break;
+
+                shiftIndices.push(i);
+                expected += step;
+            }
+
+            const shiftMap = new Map<number, number>();
+            for (const idx of shiftIndices) {
+                const ln = getLineNumber(allLines[idx])!;
+                shiftMap.set(ln, ln + step);
+            }
+
+            const edit = new vscode.WorkspaceEdit();
+
+            // Shift conflicting numbered lines
+            for (const idx of shiftIndices) {
+                const ln   = getLineNumber(allLines[idx])!;
+                let   code = stripLineNumber(allLines[idx]);
+
+                code = patchBranches(code, shiftMap);
+
+                edit.replace(
+                    doc.uri,
+                    doc.lineAt(idx).range,
+                    `${ln + step} ${code}`
+                );
+            }
+
+            // Update all GOTO/GOSUB references in other lines
+            if (shiftMap.size > 0) {
+                for (let i = 0; i < allLines.length; i++) {
+                    if (shiftIndices.includes(i)) continue;
+                    if (allLines[i].trim() === '') continue;
+
+                    const ln   = getLineNumber(allLines[i]);
+                    let   code = stripLineNumber(allLines[i]);
+
+                    const patched = patchBranches(code, shiftMap);
+
+                    if (patched !== code) {
+                        const prefix = ln !== null ? `${ln} ` : '';
+                        edit.replace(doc.uri, doc.lineAt(i).range, `${prefix}${patched}`);
+                    }
+                }
+            }
+
+            return edit;
+        };
+
+        if (isAtLineStart) {
+            const nextNum = curNum + step;
+
+            const edit = buildShiftEdit(pos.line, nextNum);
+            const code = stripLineNumber(fullText);
+
+            edit.replace(doc.uri, curLine.range, `${nextNum} ${code}`);
+
+            // Insert new numbered line ABOVE current line
+            edit.insert(
+                doc.uri,
+                new vscode.Position(pos.line, 0),
+                `${curNum} \n`
+            );
+
+            await vscode.workspace.applyEdit(edit);
+
+            // Move cursor to new line
+            editor.selection = new vscode.Selection(
+                new vscode.Position(pos.line, `${nextNum} `.length),
+                new vscode.Position(pos.line, `${nextNum} `.length)
+            );
+
+            return;
+        }
+
+        // Enter in the middle of a line → split the line
+        if (isMiddle) {
+            const left  = fullText.substring(0, pos.character);
+            const right = fullText.substring(pos.character);
+
+            const nextNum = curNum + step;
+
+            const edit = buildShiftEdit(pos.line, nextNum);
+
+            // Keep left part in current line
+            edit.replace(doc.uri, curLine.range, `${left}`);
+
+            // Move right part to a new numbered line
+            edit.insert(
+                doc.uri,
+                new vscode.Position(pos.line + 1, 0),
+                `${nextNum} ${right}\n`
+            );
+
+            await vscode.workspace.applyEdit(edit);
+
+            // Move cursor to new line
+            const newPos = new vscode.Position(pos.line + 1, `${nextNum} `.length);
+            editor.selection = new vscode.Selection(newPos, newPos);
+
+            return;
+        }
+
         const curCode = stripLineNumber(curLine.text).trim();
 
-        // ----- Double Enter: current numbered line has no code -----
-        // Clear the line number so the line becomes a blank separator.
+        // Empty numbered line → remove number (separator line)
         if (curCode === '') {
             const edit = new vscode.WorkspaceEdit();
             edit.replace(doc.uri, curLine.range, '');
             await vscode.workspace.applyEdit(edit);
-            // Cursor is now at column 0 of the blank line — ready for free-form text.
             return;
         }
 
-        // ----- Single Enter: insert a new numbered line -----
+        // Normal Enter behavior (line end or line start)
 
-        // Snapshot all lines before making any changes
+        // Snapshot all lines before modification
         const allLines: string[] = [];
         for (let i = 0; i < doc.lineCount; i++) {
             allLines.push(doc.lineAt(i).text);
@@ -223,19 +345,21 @@ export function activate(context: vscode.ExtensionContext) {
 
         const nextNum = curNum + step;
 
-        // Find consecutive numbered lines that would collide with the new number.
-        // Blank lines are skipped; a non-blank non-consecutive line stops the search.
+        // Detect consecutive numbered lines that would collide
         const shiftIndices: number[] = [];
-        let   expected = nextNum;
+        let expected = nextNum;
+
         for (let i = pos.line + 1; i < allLines.length; i++) {
-            if (allLines[i].trim() === '') continue; // skip blank lines
+            if (allLines[i].trim() === '') continue;
+
             const ln = getLineNumber(allLines[i]);
-            if (ln === null || ln !== expected) break; // unnumbered line or gap in sequence
+            if (ln === null || ln !== expected) break;
+
             shiftIndices.push(i);
             expected += step;
         }
 
-        // Build a map of old → new numbers for patching GOTO/GOSUB
+        // Build mapping for updating GOTO/GOSUB references
         const shiftMap = new Map<number, number>();
         for (const idx of shiftIndices) {
             const ln = getLineNumber(allLines[idx])!;
@@ -244,22 +368,29 @@ export function activate(context: vscode.ExtensionContext) {
 
         const edit = new vscode.WorkspaceEdit();
 
-        // Shift conflicting lines: bump their number by one step
+        // Shift conflicting numbered lines
         for (const idx of shiftIndices) {
             const ln   = getLineNumber(allLines[idx])!;
             let   code = stripLineNumber(allLines[idx]);
-            code       = patchBranches(code, shiftMap);
-            edit.replace(doc.uri, doc.lineAt(idx).range, `${ln + step} ${code}`);
+
+            code = patchBranches(code, shiftMap);
+
+            edit.replace(
+                doc.uri,
+                doc.lineAt(idx).range,
+                `${ln + step} ${code}`
+            );
         }
 
-        // Patch GOTO/GOSUB in all other lines that reference the shifted numbers
+        // Update all GOTO/GOSUB references in other lines
         if (shiftMap.size > 0) {
             for (let i = 0; i < allLines.length; i++) {
-                if (shiftIndices.includes(i)) continue; // already handled above
+                if (shiftIndices.includes(i)) continue;
                 if (allLines[i].trim() === '') continue;
 
-                const ln      = getLineNumber(allLines[i]);
-                let   code    = stripLineNumber(allLines[i]);
+                const ln   = getLineNumber(allLines[i]);
+                let   code = stripLineNumber(allLines[i]);
+
                 const patched = patchBranches(code, shiftMap);
 
                 if (patched !== code) {
@@ -269,13 +400,17 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        // Insert the new line at the end of the current line
-        const endOfCurLine = new vscode.Position(pos.line, curLine.range.end.character);
+        // Insert new numbered line
+        const endOfCurLine = new vscode.Position(
+            pos.line,
+            curLine.range.end.character
+        );
+
         edit.insert(doc.uri, endOfCurLine, `\n${nextNum} `);
 
         await vscode.workspace.applyEdit(edit);
 
-        // Move cursor to just after the new line-number prefix
+        // Move cursor to new line
         const newPos = new vscode.Position(pos.line + 1, `${nextNum} `.length);
         editor.selection = new vscode.Selection(newPos, newPos);
     });
